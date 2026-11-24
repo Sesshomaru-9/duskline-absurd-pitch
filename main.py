@@ -1,12 +1,16 @@
-"""Duskline Absurd Pitch — make.fun entry.
+#!/usr/bin/env python3
+"""Duskline Absurd Pitch — make.fun entry (Absurd Micro-Startup Pitch-Off).
 
-Writes a single one-sentence absurd micro-startup pitch for lazy AI
-agents to $MAKEFUN_OUTPUT_DIR/entry.txt (default /output).
+A single one-sentence absurd micro-startup pitch for lazy AI agents,
+written to $MAKEFUN_OUTPUT_DIR/entry.txt (default /output).
 
-The pitch (151 chars, one sentence, UTF-8):
+The pitch is 151 characters, one sentence, valid UTF-8:
   SnoozeSaaS rents lazy agents to sit through your rivals' four-hour
   product webinars and sells you the single feature worth copying,
   for $5 per webinar.
+
+The program never writes inside its own repo directory. Any failure
+to write is reported on stderr and the process still exits 0.
 """
 
 import os
@@ -19,69 +23,89 @@ ENTRY = (
 )
 
 MAX_CHARS = 200
+DEFAULT_OUTPUT_DIR = "/output"
+
+
+def _reject(reason):
+    """Print a clear rejection reason to stderr and return False."""
+    print("entry rejected: " + reason, file=sys.stderr)
+    return False
 
 
 def _validate_entry(text):
-    """Gate: 1-200 chars, single line, valid UTF-8, not only whitespace."""
+    """Gate: 1-200 chars, one line, valid UTF-8, not whitespace-only."""
     if not isinstance(text, str):
-        print("entry rejected: not a string", file=sys.stderr)
-        return False
-    if not (1 <= len(text) <= MAX_CHARS):
-        print("entry rejected: length %d outside 1-%d" % (len(text), MAX_CHARS),
-              file=sys.stderr)
-        return False
-    # Explicit CR rejection: a carriage return would break the one-line
-    # contract on Windows-style line endings.
+        return _reject("not a string")
+    if len(text) < 1 or len(text) > MAX_CHARS:
+        return _reject(
+            "length %d outside 1-%d" % (len(text), MAX_CHARS))
     if "\r" in text:
-        print("entry rejected: contains CR character", file=sys.stderr)
-        return False
+        # A carriage return would break the one-line contract on
+        # Windows-style line endings, so it is rejected outright.
+        return _reject("contains CR character")
     if "\n" in text:
-        print("entry rejected: contains newline", file=sys.stderr)
-        return False
-    # Explicit whitespace-only rejection: an entry of only spaces/tabs
-    # is not a real pitch.
+        return _reject("contains newline")
     if not text.strip():
-        print("entry rejected: only whitespace", file=sys.stderr)
-        return False
-    if text != text.strip():
-        print("entry rejected: leading/trailing whitespace", file=sys.stderr)
-        return False
+        # An entry made only of spaces/tabs is not a real pitch.
+        return _reject("only whitespace")
+    if text.strip() != text:
+        return _reject("leading/trailing whitespace")
     try:
         text.encode("utf-8")
     except UnicodeEncodeError:
-        print("entry rejected: not valid UTF-8", file=sys.stderr)
-        return False
+        return _reject("not valid UTF-8")
     return True
+
+
+def _is_inside_repo(path, repo_dir):
+    """True when path is the repo dir itself or anywhere beneath it."""
+    repo_abs = os.path.abspath(repo_dir)
+    path_abs = os.path.abspath(path)
+    return path_abs == repo_abs or path_abs.startswith(repo_abs + os.sep)
+
+
+def _write_entry(out_dir, text):
+    """Write text to entry.txt inside out_dir; False on any OSError."""
+    try:
+        os.makedirs(out_dir, exist_ok=True)
+        entry_path = os.path.join(out_dir, "entry.txt")
+        with open(entry_path, "w", encoding="utf-8", newline="\n") as handle:
+            handle.write(text)
+    except OSError as exc:
+        print("entry write failed: %s" % exc, file=sys.stderr)
+        return None
+    return entry_path
+
+
+def _read_back(entry_path, expected):
+    """Verify what landed on disk is exactly the entry text."""
+    try:
+        with open(entry_path, "r", encoding="utf-8") as handle:
+            actual = handle.read()
+    except OSError as exc:
+        print("entry read-back failed: %s" % exc, file=sys.stderr)
+        return
+    if actual != expected:
+        print("entry mismatch: entry.txt does not match ENTRY",
+              file=sys.stderr)
 
 
 def main():
     repo_dir = os.path.dirname(os.path.abspath(__file__))
-    out_dir = os.environ.get("MAKEFUN_OUTPUT_DIR", "/output")
-    out_dir_abs = os.path.abspath(out_dir)
-    repo_abs = os.path.abspath(repo_dir)
+    out_dir = os.environ.get("MAKEFUN_OUTPUT_DIR", DEFAULT_OUTPUT_DIR)
 
     # HARD GUARD: never write into the repo directory.
-    if out_dir_abs == repo_abs or out_dir_abs.startswith(repo_abs + os.sep):
+    if _is_inside_repo(out_dir, repo_dir):
         return 0
 
     if not _validate_entry(ENTRY):
         return 0
 
-    try:
-        os.makedirs(out_dir_abs, exist_ok=True)
-        entry_path = os.path.join(out_dir_abs, "entry.txt")
-        with open(entry_path, "w", encoding="utf-8", newline="\n") as f:
-            f.write(ENTRY)
-    except OSError:
+    entry_path = _write_entry(os.path.abspath(out_dir), ENTRY)
+    if entry_path is None:
         return 0
-    # Read-back check: what landed on disk must be exactly ENTRY.
-    try:
-        with open(entry_path, "r", encoding="utf-8") as f:
-            if f.read() != ENTRY:
-                print("entry mismatch: entry.txt does not match ENTRY_TEXT",
-                      file=sys.stderr)
-    except OSError:
-        print("entry read-back failed", file=sys.stderr)
+
+    _read_back(entry_path, ENTRY)
     return 0
 
 
